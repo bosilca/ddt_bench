@@ -142,7 +142,7 @@ int main(int argc, char **argv)
     double t_beg, t_end;
     double latency;
     int disps[MAX_ELEM], blklens[MAX_ELEM];
-    int i, col, opt, blocklen = 1;
+    int i, col, opt, blocklen = 1, blocklen_pos = 3;
     int size, rank;
     char *type;
     void *ptr_send, *ptr_recv;
@@ -193,8 +193,15 @@ int main(int argc, char **argv)
         ptr_send = snd_matrix_double;
         ptr_recv = rcv_matrix_double;
     }
-    if( argc > 3 ) {
-        blocklen = atoi(argv[3]);
+
+    if (rank == 0) {
+        fprintf(stdout, "(%s) LATENCY MATRIX %d x %d %ss (usecs)\n",
+                argv[0], MAX_ELEM, MAX_ELEM,
+                (opt == OPT_INT) ? "int" : "double");
+        fflush(stdout);
+    }
+    while( argc > blocklen_pos ) {
+        blocklen = atoi(argv[blocklen_pos]);
         if( (blocklen < 1) || ((col + blocklen) > MAX_ELEM) ) {
             if(!rank) {
                 printf("When col = %d blocklen must be [1 .. %d[\n", col, MAX_ELEM-col);
@@ -202,54 +209,53 @@ int main(int argc, char **argv)
                 exit(1);
             }
         }
-    }
+        blocklen_pos++;
 
-    /* Compute start and size of each row.
-     * Actually size is constant since we are transferring a column. */
-    for (i = 0; i < MAX_ELEM; i++) {
-        disps[i] = i * MAX_ELEM + col;
-        blklens[i] = blocklen;
-    }
-
-    /*
-     * count    = # of blocks
-     * array_of_blocklen = # of elems of oldtype in each block
-     * array_of_displacements   = displacement of each block (in # of elems) wrt beginning
-     */
-    MPI_Type_indexed(MAX_ELEM, blklens, disps,
-                     (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
-    MPI_Type_commit(&newtype);
-
-    init_matrices(opt, col, blocklen);
-
-    warmup(rank, col, blocklen, newtype, opt);
-
-    if (rank == 0) {
-
-        t_beg = MPI_Wtime();
-        for (i = 0; i < NB_LOOPS; i++) {
-            MPI_Send(ptr_send, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD);
-            MPI_Recv(ptr_recv, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD, &status);
-        }
-        t_end = MPI_Wtime();
-
-    } else {
-
-        for (i = 0; i < NB_LOOPS; i++) {
-            MPI_Recv(ptr_recv, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD, &status);
-            MPI_Send(ptr_send, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD);
+        /* Compute start and size of each row.
+         * Actually size is constant since we are transferring a column. */
+        for (i = 0; i < MAX_ELEM; i++) {
+            disps[i] = i * MAX_ELEM + col;
+            blklens[i] = blocklen;
         }
 
-    }
+        /*
+         * count    = # of blocks
+         * array_of_blocklen = # of elems of oldtype in each block
+         * array_of_displacements   = displacement of each block (in # of elems) wrt beginning
+         */
+        MPI_Type_indexed(MAX_ELEM, blklens, disps,
+                         (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
+        MPI_Type_commit(&newtype);
 
-    if (rank == 0) {
-        latency = (t_end - t_beg) * 1e6 / (2.0 * NB_LOOPS);
+        init_matrices(opt, col, blocklen);
 
-        fprintf(stdout, "(%s) LATENCY MATRIX %d x %d %ss (usecs)\n",
-                argv[0], MAX_ELEM, MAX_ELEM,
-                (opt == OPT_INT) ? "int" : "double");
-        fprintf(stdout, "col=%d blocklen=%d -----------------> %f usecs\n", col, blocklen, latency);
-        fflush(stdout);
+        warmup(rank, col, blocklen, newtype, opt);
+
+        if (rank == 0) {
+
+            t_beg = MPI_Wtime();
+            for (i = 0; i < NB_LOOPS; i++) {
+                MPI_Send(ptr_send, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD);
+                MPI_Recv(ptr_recv, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD, &status);
+            }
+            t_end = MPI_Wtime();
+
+        } else {
+
+            for (i = 0; i < NB_LOOPS; i++) {
+                MPI_Recv(ptr_recv, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD, &status);
+                MPI_Send(ptr_send, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD);
+            }
+
+        }
+
+        if (rank == 0) {
+            latency = (t_end - t_beg) * 1e6 / (2.0 * NB_LOOPS);
+
+            fprintf(stdout, "col=%d blocklen=%d -----------------> %f usecs\n", col, blocklen, latency);
+            fflush(stdout);
+        }
+        MPI_Type_free(&newtype);
     }
 
 

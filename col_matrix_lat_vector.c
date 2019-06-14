@@ -138,7 +138,7 @@ int main(int argc, char **argv)
 {
     double t_beg, t_end;
     double latency;
-    int i, col, opt, blocklen = 1;
+    int i, col, opt, blocklen = 1, blocklen_pos = 3;
     int size, rank;
     char *type;
     void *ptr_send, *ptr_recv;
@@ -189,8 +189,14 @@ int main(int argc, char **argv)
         ptr_send = &(snd_matrix_double[0][col]);
         ptr_recv = &(rcv_matrix_double[0][col]);
     }
-    if( argc > 3 ) {
-        blocklen = atoi(argv[3]);
+    if (rank == 0) {
+        fprintf(stdout, "(%s) LATENCY MATRIX %d x %d %ss (usecs)\n",
+                argv[0], MAX_ELEM, MAX_ELEM,
+                (opt == OPT_INT) ? "int" : "double");
+        fflush(stdout);
+    }
+    while( argc > blocklen_pos ) {
+        blocklen = atoi(argv[blocklen_pos]);
         if( (blocklen < 1) || ((col + blocklen) > MAX_ELEM) ) {
             if(!rank) {
                 printf("When col = %d blocklen must be [1 .. %d[\n", col, MAX_ELEM-col);
@@ -198,49 +204,47 @@ int main(int argc, char **argv)
                 exit(1);
             }
         }
-    }
+        blocklen_pos++;
 
-    /*
-     * count    = # of blocks
-     * blocklen = # of elems of oldtype in each block
-     * stride   = displacement of each block (in # of elems) wrt beginning
-     */
-    MPI_Type_vector(MAX_ELEM, blocklen, MAX_ELEM,
-                    (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
-    MPI_Type_commit(&newtype);
+        /*
+         * count    = # of blocks
+         * blocklen = # of elems of oldtype in each block
+         * stride   = displacement of each block (in # of elems) wrt beginning
+         */
+        MPI_Type_vector(MAX_ELEM, blocklen, MAX_ELEM,
+                        (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
+        MPI_Type_commit(&newtype);
 
-    init_matrices(opt, col, blocklen);
+        init_matrices(opt, col, blocklen);
 
-    warmup(rank, col, blocklen, newtype, opt);
+        warmup(rank, col, blocklen, newtype, opt);
 
-    if (rank == 0) {
+        if (rank == 0) {
 
-        t_beg = MPI_Wtime();
-        for (i = 0; i < NB_LOOPS; i++) {
-            MPI_Send(ptr_send, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD);
-            MPI_Recv(ptr_recv, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD, &status);
+            t_beg = MPI_Wtime();
+            for (i = 0; i < NB_LOOPS; i++) {
+                MPI_Send(ptr_send, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD);
+                MPI_Recv(ptr_recv, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD, &status);
+            }
+            t_end = MPI_Wtime();
+
+        } else {
+
+            for (i = 0; i < NB_LOOPS; i++) {
+                MPI_Recv(ptr_recv, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD, &status);
+                MPI_Send(ptr_send, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD);
+            }
+
         }
-        t_end = MPI_Wtime();
 
-    } else {
+        if (rank == 0) {
+            latency = (t_end - t_beg) * 1e6 / (2.0 * NB_LOOPS);
 
-        for (i = 0; i < NB_LOOPS; i++) {
-            MPI_Recv(ptr_recv, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD, &status);
-            MPI_Send(ptr_send, 1, newtype, 0, TAG_INDEXED, MPI_COMM_WORLD);
+            fprintf(stdout, "col=%d blocklen=%d -----------------> %f usecs\n", col, blocklen, latency);
+            fflush(stdout);
         }
-
+        MPI_Type_free(&newtype);
     }
-
-    if (rank == 0) {
-        latency = (t_end - t_beg) * 1e6 / (2.0 * NB_LOOPS);
-
-        fprintf(stdout, "(%s) LATENCY MATRIX %d x %d %ss (usecs)\n",
-                argv[0], MAX_ELEM, MAX_ELEM,
-                (opt == OPT_INT) ? "int" : "double");
-        fprintf(stdout, "col=%d blocklen=%d -----------------> %f usecs\n", col, blocklen, latency);
-        fflush(stdout);
-    }
-
 
     MPI_Finalize();
     exit(0);
