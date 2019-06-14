@@ -45,7 +45,7 @@ int snd_matrix_int[MAX_ELEM][MAX_ELEM];
 int rcv_matrix_int[MAX_ELEM][MAX_ELEM];
 int ref_rcv_matrix_int[MAX_ELEM][MAX_ELEM];
 
-void init_matrices(int opt, int col)
+void init_matrices(int opt, int col, int blocklen)
 {
     int i, j;
 
@@ -59,9 +59,9 @@ void init_matrices(int opt, int col)
                 rcv_matrix_double[i][j] = -1.0;
                 ref_rcv_matrix_double[i][j] = -1.0;
             }
-        }
-        for (i = 0; i < MAX_ELEM; i++) {
-            ref_rcv_matrix_double[i][col] = 1.0 * i * MAX_ELEM + col;
+            for( j = 0; j < blocklen; j++ ) {
+                ref_rcv_matrix_double[i][col+j] = 1.0 * i * MAX_ELEM + col + j;
+            }
         }
     } else {
         for (i = 0; i < MAX_ELEM; i++) {
@@ -70,15 +70,15 @@ void init_matrices(int opt, int col)
                 rcv_matrix_int[i][j] = -1;
                 ref_rcv_matrix_int[i][j] = -1;
             }
-        }
-        for (i = 0; i < MAX_ELEM; i++) {
-            ref_rcv_matrix_int[i][col] = i * MAX_ELEM + col;
+            for( j = 0; j < blocklen; j++ ) {
+                ref_rcv_matrix_int[i][col+j] = i * MAX_ELEM + col + j;
+            }
         }
     }
 }
 
 
-void warmup(int my_rank, int col, MPI_Datatype dtt, int opt)
+void warmup(int my_rank, int col, int blocklen, MPI_Datatype dtt, int opt)
 {
     MPI_Status status;
     int i, j;
@@ -118,6 +118,7 @@ void warmup(int my_rank, int col, MPI_Datatype dtt, int opt)
                 } else {
                     if (rcv_matrix_int[i][j] != ref_rcv_matrix_int[i][j]) {
                         printf("!!!!!!!!! rcv_matrix[%d][%d] : expected %d GOT %d\n", i, j, ref_rcv_matrix_int[i][j], rcv_matrix_int[i][j]);
+                        errors++;
                     }
                 }
             }
@@ -137,7 +138,7 @@ int main(int argc, char **argv)
 {
     double t_beg, t_end;
     double latency;
-    int i, col, opt;
+    int i, col, opt, blocklen = 1;
     int size, rank;
     char *type;
     void *ptr_send, *ptr_recv;
@@ -147,6 +148,7 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    //sleep(20);
     if (size != 2) {
         if (!rank) {
             printf("shoulf be run with 2 ranks!!!!\n");
@@ -154,9 +156,9 @@ int main(int argc, char **argv)
         MPI_Finalize();
         exit(1);
     }
-    if (argc != 3) {
+    if (argc < 3) {
         if (!rank) {
-            printf("Syntax: %s <column number> {double|int}\n", argv[0]);
+            printf("Syntax: %s <column number> {double|int} [blocklen=1]\n", argv[0]);
         }
         MPI_Finalize();
         exit(1);
@@ -187,22 +189,29 @@ int main(int argc, char **argv)
         ptr_send = &(snd_matrix_double[0][col]);
         ptr_recv = &(rcv_matrix_double[0][col]);
     }
+    if( argc > 3 ) {
+        blocklen = atoi(argv[3]);
+        if( (blocklen < 1) || ((col + blocklen) > MAX_ELEM) ) {
+            if(!rank) {
+                printf("When col = %d blocklen must be [1 .. %d[\n", col, MAX_ELEM-col);
+                MPI_Finalize();
+                exit(1);
+            }
+        }
+    }
 
     /*
      * count    = # of blocks
      * blocklen = # of elems of oldtype in each block
      * stride   = displacement of each block (in # of elems) wrt beginning
      */
-    if (opt == OPT_INT) {
-        MPI_Type_vector(MAX_ELEM, 1, MAX_ELEM, MPI_INT, &newtype);
-    } else {
-        MPI_Type_vector(MAX_ELEM, 1, MAX_ELEM, MPI_DOUBLE, &newtype);
-    }
+    MPI_Type_vector(MAX_ELEM, blocklen, MAX_ELEM,
+                    (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
     MPI_Type_commit(&newtype);
 
-    init_matrices(opt, col);
+    init_matrices(opt, col, blocklen);
 
-    warmup(rank, col, newtype, opt);
+    warmup(rank, col, blocklen, newtype, opt);
 
     if (rank == 0) {
 
@@ -228,7 +237,7 @@ int main(int argc, char **argv)
         fprintf(stdout, "(%s) LATENCY MATRIX %d x %d %ss (usecs)\n",
                 argv[0], MAX_ELEM, MAX_ELEM,
                 (opt == OPT_INT) ? "int" : "double");
-        fprintf(stdout, "col=%d -----------------> %f usecs\n", col, latency);
+        fprintf(stdout, "col=%d blocklen=%d -----------------> %f usecs\n", col, blocklen, latency);
         fflush(stdout);
     }
 
