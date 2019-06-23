@@ -148,7 +148,6 @@ int main(int argc, char **argv)
     MPI_Init(&argc, &argv);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    //sleep(20);
     if (size != 2) {
         if (!rank) {
             printf("shoulf be run with 2 ranks!!!!\n");
@@ -219,14 +218,13 @@ int main(int argc, char **argv)
 
         warmup(rank, col, blocklen, newtype, opt);
 
+        t_beg = MPI_Wtime();
         if (rank == 0) {
 
-            t_beg = MPI_Wtime();
             for (i = 0; i < NB_LOOPS; i++) {
                 MPI_Send(ptr_send, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD);
                 MPI_Recv(ptr_recv, 1, newtype, 1, TAG_INDEXED, MPI_COMM_WORLD, &status);
             }
-            t_end = MPI_Wtime();
 
         } else {
 
@@ -236,6 +234,7 @@ int main(int argc, char **argv)
             }
 
         }
+        t_end = MPI_Wtime();
 
         if (rank == 0) {
             latency = (t_end - t_beg) * 1e6 / (2.0 * NB_LOOPS);
