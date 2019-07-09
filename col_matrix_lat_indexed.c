@@ -62,7 +62,8 @@ void init_matrices(int opt, int col, int blocklen)
         }
         for (i = 0; i < MAX_ELEM; i++) {
             for( j = 0; j < blocklen; j++ ) {
-                ref_rcv_matrix_double[i][col+j] = 1.0 * i * MAX_ELEM + col + j;
+                snd_matrix_double[i][col+j]     = 1.0 * i * MAX_ELEM + col + j;
+                ref_rcv_matrix_double[i][col+j] = snd_matrix_double[i][col+j];
             }
         }
     } else {
@@ -75,7 +76,8 @@ void init_matrices(int opt, int col, int blocklen)
         }
         for (i = 0; i < MAX_ELEM; i++) {
             for( j = 0; j < blocklen; j++ ) {
-                ref_rcv_matrix_int[i][col+j] = i * MAX_ELEM + col + j;
+                snd_matrix_int[i][col+j]     = i * MAX_ELEM + col + j;
+                ref_rcv_matrix_int[i][col+j] = snd_matrix_int[i][col+j];
             }
         }
     }
@@ -85,7 +87,7 @@ void init_matrices(int opt, int col, int blocklen)
 void warmup(int my_rank, int col, int blocklen, MPI_Datatype dtt, int opt)
 {
     MPI_Status status;
-    int i, j;
+    int i, j, data_dump = 0;
     int errors;
     void *ptr_send, *ptr_recv;
 
@@ -116,11 +118,19 @@ void warmup(int my_rank, int col, int blocklen, MPI_Datatype dtt, int opt)
             for (j = 0; j < MAX_ELEM; j++) {
                 if (opt == OPT_DOUBLE) {
                     if (rcv_matrix_double[i][j] != ref_rcv_matrix_double[i][j]) {
-                            printf("!!!!!!!!! rcv_matrix[%d][%d] : expected %f GOT %f\n", i, j, ref_rcv_matrix_double[i][j], rcv_matrix_double[i][j]);
+                        if( !data_dump ) {
+                            ompi_datatype_dump(dtt);
+                            data_dump = 1;
+                        }
+                        printf("!!!!!!!!! rcv_matrix[%d][%d] : expected %f GOT %f\n", i, j, ref_rcv_matrix_double[i][j], rcv_matrix_double[i][j]);
                         errors++;
                     }
                 } else {
                     if (rcv_matrix_int[i][j] != ref_rcv_matrix_int[i][j]) {
+                        if( !data_dump ) {
+                            ompi_datatype_dump(dtt);
+                            data_dump = 1;
+                        }
                         printf("!!!!!!!!! rcv_matrix[%d][%d] : expected %d GOT %d\n", i, j, ref_rcv_matrix_int[i][j], rcv_matrix_int[i][j]);
                     }
                 }
@@ -153,13 +163,7 @@ int main(int argc, char **argv)
     //sleep(20);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    if (size != 2) {
-        if (!rank) {
-            printf("shoulf be run with 2 ranks!!!!\n");
-        }
-        MPI_Finalize();
-        exit(1);
-    }
+
     if (argc < 3) {
         if (!rank) {
             printf("Syntax: %s <column number> {double|int} [blocklen=1]\n", argv[0]);
@@ -205,8 +209,8 @@ int main(int argc, char **argv)
         if( (blocklen < 1) || ((col + blocklen) > MAX_ELEM) ) {
             if(!rank) {
                 printf("When col = %d blocklen must be [1 .. %d[\n", col, MAX_ELEM-col);
-                MPI_Finalize();
-                exit(1);
+                MPI_Abort(MPI_COMM_WORLD, -1);
+                exit(-1);
             }
         }
         blocklen_pos++;
@@ -226,6 +230,14 @@ int main(int argc, char **argv)
         MPI_Type_indexed(MAX_ELEM, blklens, disps,
                          (opt == OPT_INT) ? MPI_INT : MPI_DOUBLE, &newtype);
         MPI_Type_commit(&newtype);
+
+        if (size != 2) {  /* do the check later after creating the datatype */
+            if (!rank) {
+                printf("shoulf be run with 2 ranks!!!!\n");
+            }
+            MPI_Finalize();
+            exit(1);
+        }
 
         init_matrices(opt, col, blocklen);
 
@@ -260,7 +272,7 @@ int main(int argc, char **argv)
 
 
     MPI_Finalize();
-    exit(0);
+    return 0;
 }
 
 

@@ -60,6 +60,7 @@ void init_matrices(int opt, int col, int blocklen)
                 ref_rcv_matrix_double[i][j] = -1.0;
             }
             for( j = 0; j < blocklen; j++ ) {
+                snd_matrix_double[i][col+j]     = 1.0 * i * MAX_ELEM + col + j;
                 ref_rcv_matrix_double[i][col+j] = 1.0 * i * MAX_ELEM + col + j;
             }
         }
@@ -71,6 +72,7 @@ void init_matrices(int opt, int col, int blocklen)
                 ref_rcv_matrix_int[i][j] = -1;
             }
             for( j = 0; j < blocklen; j++ ) {
+                snd_matrix_int[i][col+j]     = 1.0 * i * MAX_ELEM + col + j;
                 ref_rcv_matrix_int[i][col+j] = i * MAX_ELEM + col + j;
             }
         }
